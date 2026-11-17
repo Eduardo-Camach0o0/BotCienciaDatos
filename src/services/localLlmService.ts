@@ -80,7 +80,8 @@ export async function queryLocalLLM(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    // Un LLM local en CPU tarda varios segundos (la 1a vez además carga el modelo en memoria)
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     const response = await fetch(endpointUrl, {
       method: 'POST',
