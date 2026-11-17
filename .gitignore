@@ -1,0 +1,35 @@
+# =====================================================================
+# REGLA INDISPENSABLE DE SEGURIDAD: NO SUBIR CREDENCIALES NI API KEYS
+# =====================================================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*
+!.env.example
+
+# Archivos de llaves o certificados
+*.key
+*.pem
+*.secret
+*credentials*.json
+*api_key*
+
+# Dependencias y compilación Vite / Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Archivos de sistema y editores
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
