@@ -51,7 +51,7 @@ async function refreshBotAnalysis() {
   isLoading.value = true;
   errorMessage.value = '';
   try {
-    const snap = buildMarketSnapshot(selectedSymbol.value, platform.value, interval.value);
+    const snap = await buildMarketSnapshot(selectedSymbol.value, platform.value, interval.value);
     candles.value = snap.candles;
     indicators.value = snap.indicators;
     llmDecision.value = await queryLocalLLM(

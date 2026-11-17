@@ -51,14 +51,44 @@ export function computeMACD(closes: number[]): { macdLine: number; macdSignal: n
 }
 
 /**
- * Genera velas recientes para MEXC o Polymarket y calcula los indicadores técnicos
- * de la estrategia EMA 10 (Amarilla) vs EMA 20 (Azul) + RSI + MACD.
+ * Obtiene velas OHLCV reales desde la API PÚBLICA de MEXC (GET /api/v3/klines).
+ * No requiere API Key: solo datos públicos de mercado.
+ * Devuelve null si el símbolo no cotiza en MEXC o si no hay conexión.
  */
-export function buildMarketSnapshot(
+export async function fetchLiveMexcCandles(symbol: string, interval: string): Promise<Candle[] | null> {
+  const mexcSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+  if (!mexcSymbols.includes(symbol)) return null;
+
+  const intervalMap: Record<string, string> = { '5m': '5m', '15m': '15m', '1h': '60m', '1d': '1d' };
+  const mexcInterval = intervalMap[interval] ?? '5m';
+
+  try {
+    const res = await fetch(`/mexc-api/api/v3/klines?symbol=${symbol}&interval=${mexcInterval}&limit=50`);
+    if (!res.ok) return null;
+    const raw = await res.json();
+    if (!Array.isArray(raw) || raw.length === 0) return null;
+    return raw.map((k: (string | number)[]) => ({
+      timestamp: new Date(Number(k[0])).toISOString(),
+      open: Number(k[1]),
+      high: Number(k[2]),
+      low: Number(k[3]),
+      close: Number(k[4]),
+      volume: Number(k[5])
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Obtiene velas (API real de MEXC; si no hay conexión o el activo no cotiza en MEXC,
+ * usa una serie simulada de respaldo) y calcula EMA 10 (Amarilla) vs EMA 20 (Azul) + RSI + MACD.
+ */
+export async function buildMarketSnapshot(
   symbol: string,
   platform: MarketPlatform,
   interval: string
-): { candles: Candle[]; indicators: TechnicalIndicators } {
+): Promise<{ candles: Candle[]; indicators: TechnicalIndicators }> {
   const basePrices: Record<string, number> = {
     BTCUSDT: 80450,
     ETHUSDT: 2275,
@@ -69,12 +99,14 @@ export function buildMarketSnapshot(
   };
 
   const base = basePrices[symbol] ?? 185.0;
+  const liveCandles = platform === 'MEXC' ? await fetchLiveMexcCandles(symbol, interval) : null;
+  const candles: Candle[] = liveCandles ?? [];
+
   const volatility = base * 0.0022;
-  const candles: Candle[] = [];
   let current = base * (1 - 0.004);
   const now = Date.now();
 
-  for (let i = 40; i >= 0; i--) {
+  for (let i = 40; !liveCandles && i >= 0; i--) {
     const drift = (Math.sin(i / 4.5) + (Math.random() - 0.46)) * volatility;
     const open = Number(current.toFixed(base < 5 ? 4 : 2));
     const close = Number(Math.max(0.01, open + drift).toFixed(base < 5 ? 4 : 2));
@@ -97,7 +129,7 @@ export function buildMarketSnapshot(
   const ema20Series = computeEMA(closes, 20);
   const lastPrice = closes[closes.length - 1];
   const firstPrice = closes[0];
-  const decimals = base < 5 ? 4 : 2;
+  const decimals = lastPrice < 5 ? 4 : 2;
 
   const ema10 = Number(ema10Series[ema10Series.length - 1].toFixed(decimals));
   const ema20 = Number(ema20Series[ema20Series.length - 1].toFixed(decimals));
