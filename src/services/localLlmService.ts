@@ -5,9 +5,7 @@ import type {
 } from '../types/trading';
 
 /**
- * REGLA INDISPENSABLE DEL PROYECTO:
- * 1. El BOT solo consume un LLM Local (localhost / 127.0.0.1).
- * 2. JAMÁS se pasan API keys, Secret keys, tokens ni credenciales a la IA.
+ * Verifica que el endpoint sea estrictamente local (localhost / 127.0.0.1).
  */
 export function verifyLocalEndpointOnly(url: string): boolean {
   try {
@@ -19,13 +17,12 @@ export function verifyLocalEndpointOnly(url: string): boolean {
 }
 
 /**
- * Construye un objeto exclusivamente con métricas técnicas numéricas,
- * garantizando que ninguna llave o credencial del archivo .env llegue al LLM.
+ * Filtra únicamente números técnicos de mercado.
+ * Garantiza que ninguna API Key ni credencial del archivo .env se envíe al LLM.
  */
 export function sanitizePayloadForLLM(ind: TechnicalIndicators): SanitizedLlmMarketPayload {
   return {
     symbol: ind.symbol,
-    platform: ind.platform,
     interval: ind.interval,
     lastPrice: Number(ind.lastPrice),
     ema10: Number(ind.ema10),
@@ -39,30 +36,27 @@ export function sanitizePayloadForLLM(ind: TechnicalIndicators): SanitizedLlmMar
 }
 
 export function buildSafePrompt(payload: SanitizedLlmMarketPayload): string {
-  const prompt = [
-    `Eres un analista cuantitativo local para el par ${payload.symbol} en ${payload.platform} (intervalo ${payload.interval}).`,
-    `Datos técnicos anonimizados (SIN credenciales ni API keys):`,
-    `- Precio actual: ${payload.lastPrice}`,
-    `- EMA 10 (Rápida): ${payload.ema10} | EMA 20 (Lenta): ${payload.ema20}`,
-    `- RSI (14): ${payload.rsi14} | Histograma MACD: ${payload.macdHistogram}`,
-    `- Señal técnica preliminar: ${payload.technicalSignal}`,
-    `- Niveles calculados -> TP: ${payload.suggestedTp} | SL: ${payload.suggestedSl}`,
-    `Responde en 2 oraciones breves en español confirmando si se debe operar LONG, SHORT o NEUTRAL y por qué.`
-  ].join('\n');
+  const direccionTexto =
+    payload.technicalSignal === 'LONG'
+      ? 'LONG (Subida, porque EMA10 está arriba de EMA20)'
+      : payload.technicalSignal === 'SHORT'
+      ? 'SHORT (Bajada, porque EMA10 está abajo de EMA20)'
+      : 'NEUTRAL (Esperar)';
 
-  // Auditoría preventiva contra fuga de llaves en el prompt
-  const forbiddenPatterns = [/api[_-]?key/i, /secret/i, /token/i, /mx0v/i];
-  for (const regex of forbiddenPatterns) {
-    if (regex.test(prompt) && !prompt.includes('SIN credenciales ni API keys')) {
-      throw new Error('Bloqueo de seguridad: Intento de incluir credenciales en el prompt de IA.');
-    }
-  }
-  return prompt;
+  return [
+    `Eres un asistente de trading en MEXC para ${payload.symbol} (temporalidad ${payload.interval}).`,
+    `Datos actuales (sin API keys):`,
+    `- Precio actual: ${payload.lastPrice} USDT`,
+    `- EMA 10 (rápida): ${payload.ema10} | EMA 20 (lenta): ${payload.ema20}`,
+    `- RSI (14): ${payload.rsi14} | MACD Histograma: ${payload.macdHistogram}`,
+    `- Señal calculada por cruce EMA: ${direccionTexto}`,
+    `- Take Profit sugerido: ${payload.suggestedTp} | Stop Loss sugerido: ${payload.suggestedSl}`,
+    `Explica en 2 oraciones claras y sencillas en español por qué la señal es ${payload.technicalSignal} basándote en EMA 10 vs EMA 20 y el RSI, e indica el Take Profit y Stop Loss.`
+  ].join('\n');
 }
 
 /**
- * Consulta exclusivamente al servidor LLM Local (ej. Ollama en http://localhost:11434/api/generate).
- * Si Ollama no está abierto en ese momento, genera la evaluación determinista local sin usar APIs en la nube.
+ * Consulta al modelo llama3.2 corriendo en Ollama local (http://localhost:11434/api/generate).
  */
 export async function queryLocalLLM(
   indicators: TechnicalIndicators,
@@ -71,7 +65,7 @@ export async function queryLocalLLM(
 ): Promise<LlmBotDecision> {
   if (!verifyLocalEndpointOnly(endpointUrl)) {
     throw new Error(
-      `Violación de arquitectura: El endpoint '${endpointUrl}' no es local. El Bot solo puede consumir un LLM Local (localhost / 127.0.0.1).`
+      `Bloqueo de seguridad: El endpoint '${endpointUrl}' no es local. Solo se permite localhost.`
     );
   }
 
@@ -80,7 +74,6 @@ export async function queryLocalLLM(
 
   try {
     const controller = new AbortController();
-    // Un LLM local en CPU tarda varios segundos (la 1a vez además carga el modelo en memoria)
     const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     const response = await fetch(endpointUrl, {
@@ -97,38 +90,30 @@ export async function queryLocalLLM(
 
     if (response.ok) {
       const data = await response.json();
-      const text: string = data.response || 'Señal validada por LLM Local.';
+      const text: string = data.response || 'Señal confirmada por el modelo local.';
       return {
-        model: `${modelName} (Ollama Conectado)`,
+        model: `${modelName} (Ollama Local Conectado)`,
         endpoint: endpointUrl,
         timestamp: new Date().toLocaleTimeString(),
         action: cleanPayload.technicalSignal,
-        confidencePct: cleanPayload.technicalSignal === 'NEUTRAL' ? 54 : 82,
+        confidencePct: cleanPayload.technicalSignal === 'NEUTRAL' ? 55 : 84,
         reasoning: text.trim(),
         sanitizedPromptUsed: safePrompt,
-        isLocalVerified: true
+        isOllamaConnected: true
       };
     }
   } catch {
-    // Si el demonio local de Ollama está apagado, responde con el motor heurístico local (jamás llama a la nube)
+    // Si Ollama está cerrado temporalmente
   }
 
-  const spreadEma = Number((cleanPayload.ema10 - cleanPayload.ema20).toFixed(4));
-  const fallbackReasoning =
-    cleanPayload.technicalSignal === 'LONG'
-      ? `[Modo Local Offline - ${modelName}] Cruce alcista confirmado: EMA10 (${cleanPayload.ema10}) supera a EMA20 (${cleanPayload.ema20}) con diferencial +${spreadEma}, RSI en ${cleanPayload.rsi14} sin sobrecompra y MACD (${cleanPayload.macdHistogram}). Entrada LONG con TP en ${cleanPayload.suggestedTp} y SL en ${cleanPayload.suggestedSl}.`
-      : cleanPayload.technicalSignal === 'SHORT'
-      ? `[Modo Local Offline - ${modelName}] Presión bajista activa: EMA10 (${cleanPayload.ema10}) debajo de EMA20 (${cleanPayload.ema20}) con diferencial ${spreadEma} y RSI en ${cleanPayload.rsi14}. Entrada SHORT con TP en ${cleanPayload.suggestedTp} y SL protegido en ${cleanPayload.suggestedSl}.`
-      : `[Modo Local Offline - ${modelName}] Mercado en compresión lateral entre EMA10 (${cleanPayload.ema10}) y EMA20 (${cleanPayload.ema20}) con RSI=${cleanPayload.rsi14}. Se recomienda mantener posición NEUTRAL hasta ruptura clara.`;
-
   return {
-    model: `${modelName} (Motor Local Seguro)`,
+    model: `${modelName} (Ollama desconectado - Abre Ollama)`,
     endpoint: endpointUrl,
     timestamp: new Date().toLocaleTimeString(),
     action: cleanPayload.technicalSignal,
-    confidencePct: cleanPayload.technicalSignal === 'NEUTRAL' ? 58 : 79,
-    reasoning: fallbackReasoning,
+    confidencePct: 75,
+    reasoning: `${indicators.signalReason} Se sugiere colocar Take Profit en ${cleanPayload.suggestedTp} y Stop Loss en ${cleanPayload.suggestedSl}.`,
     sanitizedPromptUsed: safePrompt,
-    isLocalVerified: true
+    isOllamaConnected: false
   };
 }

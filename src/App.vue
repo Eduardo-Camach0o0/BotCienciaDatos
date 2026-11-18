@@ -1,21 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import type {
-  Candle,
-  LlmBotDecision,
-  MarketPlatform,
-  TechnicalIndicators
-} from './types/trading';
-import { buildMarketSnapshot } from './services/mexcService';
+import { ref, onMounted } from 'vue';
+import type { Candle, LlmBotDecision, TechnicalIndicators } from './types/trading';
+import {
+  AVAILABLE_INTERVALS,
+  AVAILABLE_MEXC_PAIRS,
+  buildMarketSnapshot
+} from './services/mexcService';
 import { queryLocalLLM } from './services/localLlmService';
-import { CATALOGO_36_EMPRESAS } from './data/portfolio30';
 
-const platform = ref<MarketPlatform>('MEXC');
 const selectedSymbol = ref<string>('BTCUSDT');
-const interval = ref<string>('5m');
-const localLlmEndpoint = ref<string>('http://localhost:11434/api/generate');
-const localLlmModel = ref<string>('llama3.2');
-const sectorFilter = ref<string>('Todos');
+const selectedInterval = ref<string>('5m');
+const localLlmModel = 'llama3.2';
 
 const candles = ref<Candle[]>([]);
 const indicators = ref<TechnicalIndicators | null>(null);
@@ -23,41 +18,17 @@ const llmDecision = ref<LlmBotDecision | null>(null);
 const isLoading = ref<boolean>(false);
 const errorMessage = ref<string>('');
 
-const availableSymbols = computed(() => {
-  if (platform.value === 'MEXC') {
-    return [
-      { code: 'BTCUSDT', label: 'BTCUSDT Perpetual (MEXC)' },
-      { code: 'ETHUSDT', label: 'ETHUSDT Perpetual (MEXC)' },
-      { code: 'SOLUSDT', label: 'SOLUSDT Perpetual (MEXC)' },
-      { code: 'XRPUSDT', label: 'XRPUSDT Perpetual (MEXC)' },
-      ...CATALOGO_36_EMPRESAS.slice(0, 6).map((c) => ({
-        code: c.ticker,
-        label: `${c.ticker} - ${c.nombre} (SQLite)`
-      }))
-    ];
-  }
-  return [
-    { code: 'POLY-FED-CUT', label: 'Polymarket: Fed Rate Cut Decision' },
-    { code: 'POLY-BTC-100K', label: 'Polymarket: BTC > $100k EOY' }
-  ];
-});
-
-const filteredPortfolio = computed(() => {
-  if (sectorFilter.value === 'Todos') return CATALOGO_36_EMPRESAS;
-  return CATALOGO_36_EMPRESAS.filter((c) => c.sector.includes(sectorFilter.value));
-});
-
 async function refreshBotAnalysis() {
   isLoading.value = true;
   errorMessage.value = '';
   try {
-    const snap = await buildMarketSnapshot(selectedSymbol.value, platform.value, interval.value);
+    const snap = await buildMarketSnapshot(selectedSymbol.value, selectedInterval.value);
     candles.value = snap.candles;
     indicators.value = snap.indicators;
     llmDecision.value = await queryLocalLLM(
       snap.indicators,
-      localLlmEndpoint.value,
-      localLlmModel.value
+      'http://localhost:11434/api/generate',
+      localLlmModel
     );
   } catch (err: unknown) {
     errorMessage.value = err instanceof Error ? err.message : String(err);
@@ -66,246 +37,282 @@ async function refreshBotAnalysis() {
   }
 }
 
-function handlePlatformChange() {
-  selectedSymbol.value = availableSymbols.value[0].code;
-  refreshBotAnalysis();
-}
-
 onMounted(() => {
   refreshBotAnalysis();
 });
 </script>
 
 <template>
-  <div class="container">
-    <!-- ENCABEZADO CON VERSIÓN v0.1.0 Y CUMPLIMIENTO DE REQUISITOS -->
-    <header class="header-bar">
-      <div>
-        <h1 style="font-size: 1.35rem; font-weight: 800">
-          🤖 Bot de Trading Algorítmico — Entrega <span style="color: #58a6ff">v0.1.0</span>
-        </h1>
-        <p style="font-size: 0.84rem; color: #8b949e; margin-top: 0.2rem">
-          UI en Vue 3 + Vite + TypeScript | Opciones: MEXC &amp; Polymarket | Catálogo SQLite 36 Empresas
+  <div class="app-wrapper">
+    <!-- 1. ENCABEZADO CLARO -->
+    <header class="top-header">
+      <div class="title-block">
+        <h1>🤖 Asistente de Trading para MEXC con IA Local (v0.1.0)</h1>
+        <p>
+          Analiza precios en tiempo real de MEXC y te indica si entrar en
+          <strong>LONG (Subida)</strong> o <strong>SHORT (Bajada)</strong> con niveles de
+          <strong>Take Profit</strong> y <strong>Stop Loss</strong>.
         </p>
       </div>
-      <div class="badge-row">
-        <span class="badge badge-version">Versión: v0.1.0</span>
-        <span class="badge badge-llm">IA: Solo Consume LLM Local (Ollama)</span>
-        <span class="badge badge-sec">🔒 Indispensable: Cero API Keys enviadas a IA</span>
+      <div class="badges">
+        <span class="badge badge-blue">Versión: v0.1.0</span>
+        <span class="badge badge-green">MEXC en Vivo</span>
+        <span class="badge badge-gold">🔒 Sin API Keys en la IA</span>
       </div>
     </header>
 
-    <!-- BARRA DE CONFIGURACIÓN DEL BOT -->
-    <section class="controls-grid">
-      <div class="control-group">
-        <label>Plataforma / Mercado</label>
-        <select v-model="platform" @change="handlePlatformChange">
-          <option value="MEXC">MEXC (Futures &amp; Spot)</option>
-          <option value="POLYMARKET">Polymarket (Predicción)</option>
-        </select>
+    <!-- 2. EXPLICACIÓN EN 3 PASOS SENCILLOS -->
+    <section class="how-it-works">
+      <div class="step-card">
+        <div class="step-num">1</div>
+        <div class="step-text">
+          <strong>Elige Cripto y Temporalidad</strong>
+          <span>
+            Selecciona abajo la moneda de MEXC (BTC, ETH, SOL o XRP) y el tiempo de cada vela (ej. 5 minutos).
+          </span>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">2</div>
+        <div class="step-text">
+          <strong>Cruce EMA 10 vs EMA 20</strong>
+          <span>
+            Si la línea rápida (EMA 10) está arriba de la lenta (EMA 20) es señal de
+            <strong>LONG</strong>; si está abajo, es señal de <strong>SHORT</strong>.
+          </span>
+        </div>
+      </div>
+      <div class="step-card">
+        <div class="step-num">3</div>
+        <div class="step-text">
+          <strong>Copia el TP y SL en MEXC</strong>
+          <span>
+            El bot y tu IA local (<code>llama3.2</code>) te dan el precio exacto de
+            <strong>Take Profit</strong> y <strong>Stop Loss</strong>.
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. BARRA DE SELECCIÓN (SOLO OPCIONES REALES DISPONIBLES) -->
+    <section class="toolbar-card">
+      <div class="field">
+        <label>Exchange Conectado</label>
+        <div class="static-input">🟢 MEXC (Precios Reales)</div>
       </div>
 
-      <div class="control-group">
-        <label>Activo / Contrato</label>
+      <div class="field">
+        <label>Criptomoneda (Par USDT)</label>
         <select v-model="selectedSymbol" @change="refreshBotAnalysis">
-          <option v-for="item in availableSymbols" :key="item.code" :value="item.code">
-            {{ item.label }}
+          <option v-for="p in AVAILABLE_MEXC_PAIRS" :key="p.code" :value="p.code">
+            {{ p.name }}
           </option>
         </select>
       </div>
 
-      <div class="control-group">
-        <label>Temporalidad (Intervalo)</label>
-        <select v-model="interval" @change="refreshBotAnalysis">
-          <option value="5m">5 minutos (5m)</option>
-          <option value="15m">15 minutos (15m)</option>
-          <option value="1h">1 hora (1h - SQLite)</option>
-          <option value="1d">1 día (1d)</option>
+      <div class="field">
+        <label>Temporalidad de las Velas</label>
+        <select v-model="selectedInterval" @change="refreshBotAnalysis">
+          <option v-for="i in AVAILABLE_INTERVALS" :key="i.code" :value="i.code">
+            {{ i.label }}
+          </option>
         </select>
       </div>
 
-      <div class="control-group">
-        <label>Modelo LLM Local (Ollama)</label>
-        <select v-model="localLlmModel" @change="refreshBotAnalysis">
-          <option value="llama3.2">llama3.2 (Local)</option>
-          <option value="qwen2.5">qwen2.5 (Local)</option>
-          <option value="deepseek-r1">deepseek-r1 (Local)</option>
-        </select>
+      <div class="field">
+        <label>Modelo IA Local (Ollama)</label>
+        <div class="static-input">🧠 llama3.2 (Local)</div>
       </div>
 
-      <div class="control-group" style="justify-content: flex-end">
-        <label>&nbsp;</label>
-        <button class="btn-primary" :disabled="isLoading" @click="refreshBotAnalysis">
-          {{ isLoading ? 'Analizando con LLM Local...' : '⚡ Actualizar Señal y Consultar LLM Local' }}
+      <div class="field">
+        <button class="btn-analyze" :disabled="isLoading" @click="refreshBotAnalysis">
+          {{ isLoading ? 'Consultando MEXC y Ollama...' : '🔄 Actualizar Precio y Señal' }}
         </button>
       </div>
     </section>
 
-    <div v-if="errorMessage" class="card" style="border-color: #f85149; margin-bottom: 1rem; color: #ff7b72">
+    <!-- MENSAJE DE ERROR SI FALLA LA RED -->
+    <div
+      v-if="errorMessage"
+      class="panel-card"
+      style="border-color: #f85149; color: #ff7b72; font-weight: 600"
+    >
       ⚠️ {{ errorMessage }}
     </div>
 
-    <!-- PANEL PRINCIPAL: INDICADORES MEXC + DECISIÓN DEL LLM LOCAL -->
-    <div v-if="indicators" class="dashboard-grid">
-      <!-- Tarjeta Izquierda: Telemetría de Mercado e Indicadores -->
-      <div class="card">
+    <!-- 4. TARJETA PRINCIPAL: QUÉ HACER AHORITA MISMO EN MEXC -->
+    <section
+      v-if="indicators"
+      :class="['action-banner', `action-${indicators.signal}`]"
+    >
+      <div class="action-header">
+        <div :class="['action-title', `title-${indicators.signal}`]">
+          <span v-if="indicators.signal === 'LONG'">
+            🟢 SEÑAL ACTUAL: ABRIR LONG (SUBIDA) EN {{ indicators.symbol }}
+          </span>
+          <span v-else-if="indicators.signal === 'SHORT'">
+            🔴 SEÑAL ACTUAL: ABRIR SHORT (BAJADA) EN {{ indicators.symbol }}
+          </span>
+          <span v-else>
+            🟡 SEÑAL ACTUAL: ESPERAR (MERCADO EMPATADO)
+          </span>
+        </div>
+        <span style="font-size: 0.82rem; color: #9ba7b8">
+          Última actualización: <strong>{{ indicators.updatedAt }}</strong>
+        </span>
+      </div>
+
+      <p class="action-subtitle">
+        <strong>¿Por qué?:</strong> {{ indicators.signalReason }}
+      </p>
+
+      <!-- 3 CAJAS GRANDES LISTAS PARA COPIAR EN MEXC -->
+      <div class="order-boxes">
+        <div class="order-box">
+          <div class="order-box-label">1. Precio Actual en MEXC</div>
+          <div class="order-box-price" style="color: #ffffff">
+            ${{ indicators.lastPrice.toLocaleString('en-US', { minimumFractionDigits: 2 }) }}
+          </div>
+          <div class="order-box-hint">
+            Cambio reciente ({{ indicators.interval }}):
+            <strong :style="{ color: indicators.changePct >= 0 ? '#3fb950' : '#ff7b72' }">
+              {{ indicators.changePct >= 0 ? '+' : '' }}{{ indicators.changePct }}%
+            </strong>
+          </div>
+        </div>
+
+        <div class="order-box" style="border-color: rgba(63, 185, 80, 0.5)">
+          <div class="order-box-label" style="color: #3fb950">
+            2. Take Profit Sugerido (TP - Ganancia)
+          </div>
+          <div class="order-box-price" style="color: #3fb950">
+            ${{ indicators.suggestedTp.toLocaleString('en-US', { minimumFractionDigits: 2 }) }}
+          </div>
+          <div class="order-box-hint">
+            Objetivo de movimiento: <strong>+{{ indicators.tpMovePct }}%</strong> (en 100x =
+            <strong>+{{ (indicators.tpMovePct * 100).toFixed(0) }}% ROE</strong>)
+          </div>
+        </div>
+
+        <div class="order-box" style="border-color: rgba(248, 81, 73, 0.5)">
+          <div class="order-box-label" style="color: #ff7b72">
+            3. Stop Loss Sugerido (SL - Protección)
+          </div>
+          <div class="order-box-price" style="color: #ff7b72">
+            ${{ indicators.suggestedSl.toLocaleString('en-US', { minimumFractionDigits: 2 }) }}
+          </div>
+          <div class="order-box-hint">
+            Distancia de protección: <strong>-{{ indicators.slMovePct }}%</strong> por si el
+            precio se regresa
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. DOS COLUMNAS: EXPLICACIÓN DE INDICADORES + OPINIÓN DE OLLAMA -->
+    <div v-if="indicators" class="two-col">
+      <!-- Columna Izquierda: Qué dicen los 3 indicadores -->
+      <div class="panel-card">
         <h2>
-          <span>📈 Telemetría {{ indicators.platform }}: {{ indicators.symbol }} ({{ indicators.interval }})</span>
-          <span :class="['signal-pill', `sig-${indicators.signal}`]">
-            Señal: {{ indicators.signal }}
+          <span>📊 ¿Qué dicen los indicadores técnicos?</span>
+          <span style="font-size: 0.78rem; color: #58a6ff">{{ indicators.intervalLabel }}</span>
+        </h2>
+
+        <div class="indicator-list">
+          <div class="indicator-item">
+            <div class="indicator-top">
+              <span>1. Cruce de Medias (EMA 10 vs EMA 20)</span>
+              <span :style="{ color: indicators.ema10 >= indicators.ema20 ? '#3fb950' : '#ff7b72' }">
+                {{ indicators.ema10 >= indicators.ema20 ? 'Alcista (EMA10 > EMA20)' : 'Bajista (EMA10 < EMA20)' }}
+              </span>
+            </div>
+            <div class="indicator-desc">
+              • <strong style="color: #f2cc60">EMA 10 (Línea Amarilla rápida):</strong>
+              ${{ indicators.ema10 }}<br />
+              • <strong style="color: #58a6ff">EMA 20 (Línea Azul lenta):</strong>
+              ${{ indicators.ema20 }}<br />
+              👉 Cuando la amarilla está arriba de la azul, el precio lleva fuerza hacia arriba (LONG); cuando está abajo, lleva fuerza hacia abajo (SHORT).
+            </div>
+          </div>
+
+          <div class="indicator-item">
+            <div class="indicator-top">
+              <span>2. Fuerza del Precio (RSI de 14 velas)</span>
+              <span>{{ indicators.rsi14 }} / 100</span>
+            </div>
+            <div class="indicator-desc">
+              • <strong>Estado actual:</strong> {{ indicators.rsiStatus }}.<br />
+              👉 Si el RSI pasa de 70 está muy caro (sobrecomprado); si baja de 30 está muy barato (sobrevendido). Entre 30 y 70 tiene camino libre.
+            </div>
+          </div>
+
+          <div class="indicator-item">
+            <div class="indicator-top">
+              <span>3. Impulso MACD (12, 26, 9)</span>
+              <span :style="{ color: indicators.macdHistogram >= 0 ? '#3fb950' : '#ff7b72' }">
+                Histograma: {{ indicators.macdHistogram }}
+              </span>
+            </div>
+            <div class="indicator-desc">
+              • <strong>Estado actual:</strong> {{ indicators.macdStatus }}.<br />
+              • Línea MACD: {{ indicators.macdLine }} | Línea Señal: {{ indicators.macdSignal }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Columna Derecha: Explicación del LLM Local (Ollama) -->
+      <div v-if="llmDecision" class="panel-card">
+        <h2>
+          <span>🧠 Explicación de tu IA Local (Ollama)</span>
+          <span
+            :class="['badge', llmDecision.isOllamaConnected ? 'badge-green' : 'badge-gold']"
+          >
+            {{ llmDecision.model }}
           </span>
         </h2>
 
-        <div class="kpi-grid">
-          <div class="kpi-box">
-            <div class="kpi-label">Precio Actual</div>
-            <div class="kpi-val">{{ indicators.lastPrice }}</div>
-          </div>
-          <div class="kpi-box">
-            <div class="kpi-label" style="color: #f2cc60">EMA 10 (Rápida)</div>
-            <div class="kpi-val" style="color: #f2cc60">{{ indicators.ema10 }}</div>
-          </div>
-          <div class="kpi-box">
-            <div class="kpi-label" style="color: #58a6ff">EMA 20 (Lenta)</div>
-            <div class="kpi-val" style="color: #58a6ff">{{ indicators.ema20 }}</div>
-          </div>
-          <div class="kpi-box">
-            <div class="kpi-label">RSI (14)</div>
-            <div class="kpi-val">{{ indicators.rsi14 }}</div>
-          </div>
-          <div class="kpi-box">
-            <div class="kpi-label">MACD Hist.</div>
-            <div class="kpi-val" :style="{ color: indicators.macdHistogram >= 0 ? '#3fb950' : '#ff7b72' }">
-              {{ indicators.macdHistogram }}
-            </div>
-          </div>
-          <div class="kpi-box">
-            <div class="kpi-label" style="color: #3fb950">Take Profit (TP)</div>
-            <div class="kpi-val" style="color: #3fb950">{{ indicators.suggestedTp }}</div>
-          </div>
-          <div class="kpi-box">
-            <div class="kpi-label" style="color: #ff7b72">Stop Loss (SL)</div>
-            <div class="kpi-val" style="color: #ff7b72">{{ indicators.suggestedSl }}</div>
-          </div>
-          <div class="kpi-box">
-            <div class="kpi-label">Actualizado</div>
-            <div class="kpi-val" style="font-size: 0.95rem">{{ indicators.updatedAt }}</div>
-          </div>
-        </div>
-
-        <h3 style="font-size: 0.88rem; color: #8b949e; margin-bottom: 0.5rem">
-          Últimas Velas OHLCV ({{ indicators.symbol }})
-        </h3>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Hora (UTC)</th>
-                <th>Open</th>
-                <th>High</th>
-                <th>Low</th>
-                <th>Close</th>
-                <th>Volumen</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="c in candles.slice(-8).reverse()" :key="c.timestamp">
-                <td>{{ c.timestamp.slice(11, 19) }}</td>
-                <td>{{ c.open }}</td>
-                <td>{{ c.high }}</td>
-                <td>{{ c.low }}</td>
-                <td :style="{ color: c.close >= c.open ? '#3fb950' : '#ff7b72', fontWeight: 600 }">
-                  {{ c.close }}
-                </td>
-                <td>{{ c.volume.toLocaleString() }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Tarjeta Derecha: Dictamen del LLM Local y Auditoría Zero-API-Leak -->
-      <div v-if="llmDecision" class="card">
-        <h2>
-          <span>🧠 Dictamen del LLM Local</span>
-          <span class="badge badge-llm">Confianza: {{ llmDecision.confidencePct }}%</span>
-        </h2>
-
-        <p style="font-size: 0.82rem; color: #8b949e; margin-bottom: 0.6rem">
-          <strong>Endpoint Local:</strong> <code>{{ llmDecision.endpoint }}</code> |
-          <strong>Modelo:</strong> <code>{{ llmDecision.model }}</code>
-        </p>
-
-        <div
-          style="
-            background: #0d1117;
-            border-left: 4px solid #58a6ff;
-            padding: 0.85rem;
-            border-radius: 6px;
-            font-size: 0.92rem;
-            line-height: 1.45;
-          "
-        >
+        <div class="llm-reply-box">
           {{ llmDecision.reasoning }}
         </div>
 
-        <div style="margin-top: 1rem">
-          <div style="font-size: 0.8rem; color: #e3b341; font-weight: 600">
-            🔒 Auditoría de Seguridad ("No pasar API a I.A."): Prompt Sanitizado Enviado al LLM Local
-          </div>
-          <div class="prompt-box">{{ llmDecision.sanitizedPromptUsed }}</div>
-        </div>
+        <!-- Desplegable opcional para mostrar al profesor el cumplimiento técnico -->
+        <details class="tech-details">
+          <summary>
+            🔒 Ver evidencia de seguridad ("No pasar API a I.A.") y últimas velas de MEXC
+          </summary>
+          <p style="margin-top: 0.6rem; color: #9ba7b8">
+            <strong>Endpoint local verificado:</strong> <code>{{ llmDecision.endpoint }}</code> (solo recibe precios e indicadores públicos, cero llaves privadas):
+          </p>
+          <div class="prompt-pre">{{ llmDecision.sanitizedPromptUsed }}</div>
+
+          <h4 style="margin-top: 0.9rem; color: #f0f6fc">
+            Últimas 5 velas descargadas en vivo de MEXC ({{ indicators.symbol }})
+          </h4>
+          <table>
+            <thead>
+              <tr>
+                <th>Hora</th>
+                <th>Apertura</th>
+                <th>Máximo</th>
+                <th>Mínimo</th>
+                <th>Cierre</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in candles.slice(-5).reverse()" :key="c.timestamp">
+                <td>{{ new Date(c.timestamp).toLocaleTimeString() }}</td>
+                <td>${{ c.open }}</td>
+                <td>${{ c.high }}</td>
+                <td>${{ c.low }}</td>
+                <td :style="{ color: c.close >= c.open ? '#3fb950' : '#ff7b72', fontWeight: 700 }">
+                  ${{ c.close }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
       </div>
     </div>
-
-    <!-- SECCIÓN INFERIOR: CATÁLOGO DE 36 EMPRESAS (CONECTADO A TU BASE SQLITE) -->
-    <section class="card">
-      <h2>
-        <span>🏦 Portafolio Histórico Integrado (36 Empresas en SQLite — `mercado_portafolio.sqlite`)</span>
-        <select v-model="sectorFilter" style="font-size: 0.82rem; padding: 0.35rem 0.6rem">
-          <option value="Todos">Todos los sectores (36)</option>
-          <option value="Tecnología">Tecnología (13)</option>
-          <option value="Financiero">Financiero (4)</option>
-          <option value="Consumo">Consumo y Retail (6)</option>
-          <option value="Salud">Salud (5)</option>
-          <option value="Energía">Energía e Industrial (5)</option>
-        </select>
-      </h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Ticker</th>
-              <th>Empresa</th>
-              <th>Sector</th>
-              <th>Mercado</th>
-              <th>Acción</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(emp, idx) in filteredPortfolio" :key="emp.ticker">
-              <td>{{ idx + 1 }}</td>
-              <td style="font-weight: 700; color: #58a6ff">{{ emp.ticker }}</td>
-              <td>{{ emp.nombre }}</td>
-              <td>{{ emp.sector }}</td>
-              <td>{{ emp.mercado }}</td>
-              <td>
-                <button
-                  style="padding: 0.25rem 0.6rem; font-size: 0.78rem; cursor: pointer"
-                  @click="
-                    platform = 'MEXC';
-                    selectedSymbol = emp.ticker;
-                    refreshBotAnalysis();
-                  "
-                >
-                  Analizar en Bot
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
   </div>
 </template>

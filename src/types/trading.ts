@@ -1,5 +1,3 @@
-export type MarketPlatform = 'MEXC' | 'POLYMARKET';
-
 export type SignalDirection = 'LONG' | 'SHORT' | 'NEUTRAL';
 
 export interface Candle {
@@ -13,29 +11,36 @@ export interface Candle {
 
 export interface TechnicalIndicators {
   symbol: string;
-  platform: MarketPlatform;
+  symbolName: string;
   interval: string;
+  intervalLabel: string;
   lastPrice: number;
-  change24hPct: number;
+  changePct: number;
   ema10: number;
   ema20: number;
+  emaSpreadPct: number;
   rsi14: number;
+  rsiStatus: string;
   macdLine: number;
   macdSignal: number;
   macdHistogram: number;
+  macdStatus: string;
   signal: SignalDirection;
+  signalReason: string;
   suggestedTp: number;
   suggestedSl: number;
+  tpMovePct: number;
+  slMovePct: number;
   updatedAt: string;
+  isLiveMexc: boolean;
 }
 
 /**
- * Payload estrictamente sanitizado para el LLM Local.
- * PROHIBIDO incluir llaves de API, tokens, IDs de cuenta o firmas.
+ * Datos sanitizados que se envían al LLM Local (Ollama).
+ * PROHIBIDO incluir llaves de API, tokens o credenciales.
  */
 export interface SanitizedLlmMarketPayload {
   symbol: string;
-  platform: MarketPlatform;
   interval: string;
   lastPrice: number;
   ema10: number;
@@ -55,12 +60,5 @@ export interface LlmBotDecision {
   confidencePct: number;
   reasoning: string;
   sanitizedPromptUsed: string;
-  isLocalVerified: boolean;
-}
-
-export interface PortfolioCompany {
-  ticker: string;
-  nombre: string;
-  sector: string;
-  mercado: string;
+  isOllamaConnected: boolean;
 }

@@ -1,4 +1,19 @@
-import type { Candle, MarketPlatform, SignalDirection, TechnicalIndicators } from '../types/trading';
+import type { Candle, SignalDirection, TechnicalIndicators } from '../types/trading';
+
+export const AVAILABLE_MEXC_PAIRS = [
+  { code: 'BTCUSDT', name: 'Bitcoin (BTC/USDT)' },
+  { code: 'ETHUSDT', name: 'Ethereum (ETH/USDT)' },
+  { code: 'SOLUSDT', name: 'Solana (SOL/USDT)' },
+  { code: 'XRPUSDT', name: 'Ripple (XRP/USDT)' }
+];
+
+export const AVAILABLE_INTERVALS = [
+  { code: '1m', label: '1 minuto (Scalping rápido)', mexcCode: '1m' },
+  { code: '5m', label: '5 minutos (Operación intradía)', mexcCode: '5m' },
+  { code: '15m', label: '15 minutos (Tendencia corta)', mexcCode: '15m' },
+  { code: '1h', label: '1 hora (Tendencia media)', mexcCode: '60m' },
+  { code: '1d', label: '1 día (Tendencia diaria)', mexcCode: '1d' }
+];
 
 /**
  * Calcula una Media Móvil Exponencial (EMA) de periodo N sobre los precios de cierre.
@@ -14,28 +29,41 @@ export function computeEMA(closes: number[], period: number): number[] {
 }
 
 /**
- * Calcula el RSI de 14 periodos sobre la serie de cierres.
+ * Calcula el RSI de 14 periodos usando el suavizado clásico de Wilder.
  */
 export function computeRSI(closes: number[], period = 14): number {
   if (closes.length <= period) return 50;
   let gains = 0;
   let losses = 0;
-  for (let i = closes.length - period; i < closes.length; i++) {
+  for (let i = 1; i <= period; i++) {
     const diff = closes[i] - closes[i - 1];
     if (diff >= 0) gains += diff;
     else losses -= diff;
   }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  }
+
   if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
   return Number((100 - 100 / (1 + rs)).toFixed(2));
 }
 
 /**
- * Calcula MACD (12, 26, 9) y devuelve línea MACD, Señal e Histograma.
+ * Calcula MACD (12, 26, 9).
  */
-export function computeMACD(closes: number[]): { macdLine: number; macdSignal: number; macdHistogram: number } {
+export function computeMACD(closes: number[]): {
+  macdLine: number;
+  macdSignal: number;
+  macdHistogram: number;
+} {
   if (closes.length < 26) {
     return { macdLine: 0, macdSignal: 0, macdHistogram: 0 };
   }
@@ -51,125 +79,146 @@ export function computeMACD(closes: number[]): { macdLine: number; macdSignal: n
 }
 
 /**
- * Obtiene velas OHLCV reales desde la API PÚBLICA de MEXC (GET /api/v3/klines).
- * No requiere API Key: solo datos públicos de mercado.
- * Devuelve null si el símbolo no cotiza en MEXC o si no hay conexión.
+ * Descarga velas OHLCV reales en vivo desde la API pública de MEXC (/api/v3/klines).
  */
-export async function fetchLiveMexcCandles(symbol: string, interval: string): Promise<Candle[] | null> {
-  const mexcSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
-  if (!mexcSymbols.includes(symbol)) return null;
+export async function fetchLiveMexcCandles(
+  symbol: string,
+  interval: string
+): Promise<Candle[]> {
+  const foundInterval = AVAILABLE_INTERVALS.find((i) => i.code === interval);
+  const mexcInterval = foundInterval ? foundInterval.mexcCode : '5m';
 
-  const intervalMap: Record<string, string> = { '5m': '5m', '15m': '15m', '1h': '60m', '1d': '1d' };
-  const mexcInterval = intervalMap[interval] ?? '5m';
-
-  try {
-    const res = await fetch(`/mexc-api/api/v3/klines?symbol=${symbol}&interval=${mexcInterval}&limit=50`);
-    if (!res.ok) return null;
-    const raw = await res.json();
-    if (!Array.isArray(raw) || raw.length === 0) return null;
-    return raw.map((k: (string | number)[]) => ({
-      timestamp: new Date(Number(k[0])).toISOString(),
-      open: Number(k[1]),
-      high: Number(k[2]),
-      low: Number(k[3]),
-      close: Number(k[4]),
-      volume: Number(k[5])
-    }));
-  } catch {
-    return null;
+  const res = await fetch(
+    `/mexc-api/api/v3/klines?symbol=${symbol}&interval=${mexcInterval}&limit=60`
+  );
+  if (!res.ok) {
+    throw new Error(`Error al consultar MEXC API (HTTP ${res.status})`);
   }
+  const raw = await res.json();
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('MEXC API devolvió una lista de velas vacía.');
+  }
+
+  return raw.map((k: (string | number)[]) => ({
+    timestamp: new Date(Number(k[0])).toISOString(),
+    open: Number(k[1]),
+    high: Number(k[2]),
+    low: Number(k[3]),
+    close: Number(k[4]),
+    volume: Number(k[5])
+  }));
 }
 
 /**
- * Obtiene velas (API real de MEXC; si no hay conexión o el activo no cotiza en MEXC,
- * usa una serie simulada de respaldo) y calcula EMA 10 (Amarilla) vs EMA 20 (Azul) + RSI + MACD.
+ * Construye el análisis completo de mercado de MEXC con señales claras LONG / SHORT.
  */
 export async function buildMarketSnapshot(
   symbol: string,
-  platform: MarketPlatform,
   interval: string
 ): Promise<{ candles: Candle[]; indicators: TechnicalIndicators }> {
-  const basePrices: Record<string, number> = {
-    BTCUSDT: 80450,
-    ETHUSDT: 2275,
-    SOLUSDT: 100.4,
-    XRPUSDT: 0.542,
-    'POLY-FED-CUT': 0.68,
-    'POLY-BTC-100K': 0.42
+  const pairInfo = AVAILABLE_MEXC_PAIRS.find((p) => p.code === symbol) ?? {
+    code: symbol,
+    name: symbol
+  };
+  const intervalInfo = AVAILABLE_INTERVALS.find((i) => i.code === interval) ?? {
+    code: interval,
+    label: interval,
+    mexcCode: '5m'
   };
 
-  const base = basePrices[symbol] ?? 185.0;
-  const liveCandles = platform === 'MEXC' ? await fetchLiveMexcCandles(symbol, interval) : null;
-  const candles: Candle[] = liveCandles ?? [];
-
-  const volatility = base * 0.0022;
-  let current = base * (1 - 0.004);
-  const now = Date.now();
-
-  for (let i = 40; !liveCandles && i >= 0; i--) {
-    const drift = (Math.sin(i / 4.5) + (Math.random() - 0.46)) * volatility;
-    const open = Number(current.toFixed(base < 5 ? 4 : 2));
-    const close = Number(Math.max(0.01, open + drift).toFixed(base < 5 ? 4 : 2));
-    const high = Number((Math.max(open, close) + Math.abs(drift) * 0.65).toFixed(base < 5 ? 4 : 2));
-    const low = Number((Math.min(open, close) - Math.abs(drift) * 0.55).toFixed(base < 5 ? 4 : 2));
-    const volume = Math.round(12000 + Math.random() * 45000);
-    candles.push({
-      timestamp: new Date(now - i * 300000).toISOString(),
-      open,
-      high,
-      low,
-      close,
-      volume
-    });
-    current = close;
-  }
-
+  const candles = await fetchLiveMexcCandles(symbol, interval);
   const closes = candles.map((c) => c.close);
   const ema10Series = computeEMA(closes, 10);
   const ema20Series = computeEMA(closes, 20);
+
   const lastPrice = closes[closes.length - 1];
   const firstPrice = closes[0];
   const decimals = lastPrice < 5 ? 4 : 2;
 
   const ema10 = Number(ema10Series[ema10Series.length - 1].toFixed(decimals));
   const ema20 = Number(ema20Series[ema20Series.length - 1].toFixed(decimals));
+  const emaSpreadPct = Number((((ema10 - ema20) / ema20) * 100).toFixed(3));
+
   const rsi14 = computeRSI(closes, 14);
   const { macdLine, macdSignal, macdHistogram } = computeMACD(closes);
 
+  // Interpretación clara del RSI
+  let rsiStatus = 'Zona neutral (espacio libre para moverse)';
+  if (rsi14 >= 70) rsiStatus = 'Sobrecompra (>70, cuidado con caída)';
+  else if (rsi14 >= 55) rsiStatus = 'Fuerza alcista sana (55 a 70)';
+  else if (rsi14 <= 30) rsiStatus = 'Sobreventa (<30, posible rebote)';
+  else if (rsi14 <= 45) rsiStatus = 'Presión bajista activa (30 a 45)';
+
+  // Interpretación clara del MACD
+  const macdStatus =
+    macdHistogram >= 0
+      ? 'Histograma verde positivo (impulso alcista)'
+      : 'Histograma rojo negativo (impulso bajista)';
+
+  // Regla de decisión basada en el cruce EMA 10 (Amarilla) vs EMA 20 (Azul):
+  // - Si EMA 10 está arriba de EMA 20 y no está sobrecomprado extremo -> LONG
+  // - Si EMA 10 está abajo de EMA 20 y no está sobrevendido extremo -> SHORT
   let signal: SignalDirection = 'NEUTRAL';
-  if (ema10 > ema20 && lastPrice >= ema10 && rsi14 < 70) {
+  let signalReason = '';
+
+  if (ema10 > ema20 && rsi14 < 75) {
     signal = 'LONG';
-  } else if (ema10 < ema20 && lastPrice <= ema10 && rsi14 > 30) {
+    signalReason = `La línea rápida EMA 10 (${ema10}) está POR ENCIMA de la línea lenta EMA 20 (${ema20}) y el RSI (${rsi14}) tiene espacio para subir.`;
+  } else if (ema10 < ema20 && rsi14 > 25) {
     signal = 'SHORT';
+    signalReason = `La línea rápida EMA 10 (${ema10}) está POR DEBAJO de la línea lenta EMA 20 (${ema20}) indicando tendencia hacia abajo.`;
+  } else {
+    signal = 'NEUTRAL';
+    signalReason = `Las medias EMA 10 (${ema10}) y EMA 20 (${ema20}) están empatadas o el RSI (${rsi14}) está en zona extrema.`;
   }
 
-  const tpDelta = lastPrice * 0.0035;
-  const slDelta = lastPrice * 0.0025;
+  // Cálculo de distancia para Take Profit y Stop Loss según la temporalidad
+  const riskFactors: Record<string, { tp: number; sl: number }> = {
+    '1m': { tp: 0.002, sl: 0.0015 },
+    '5m': { tp: 0.0035, sl: 0.0025 },
+    '15m': { tp: 0.006, sl: 0.004 },
+    '1h': { tp: 0.012, sl: 0.008 },
+    '1d': { tp: 0.03, sl: 0.02 }
+  };
+  const factor = riskFactors[interval] ?? { tp: 0.0035, sl: 0.0025 };
+
+  const tpDelta = lastPrice * factor.tp;
+  const slDelta = lastPrice * factor.sl;
+
+  const isShort = signal === 'SHORT';
   const suggestedTp = Number(
-    (signal === 'SHORT' ? lastPrice - tpDelta : lastPrice + tpDelta).toFixed(decimals)
+    (isShort ? lastPrice - tpDelta : lastPrice + tpDelta).toFixed(decimals)
   );
   const suggestedSl = Number(
-    (signal === 'SHORT' ? lastPrice + slDelta : lastPrice - slDelta).toFixed(decimals)
+    (isShort ? lastPrice + slDelta : lastPrice - slDelta).toFixed(decimals)
   );
 
   return {
     candles,
     indicators: {
       symbol,
-      platform,
+      symbolName: pairInfo.name,
       interval,
+      intervalLabel: intervalInfo.label,
       lastPrice,
-      change24hPct: Number((((lastPrice - firstPrice) / firstPrice) * 100).toFixed(2)),
+      changePct: Number((((lastPrice - firstPrice) / firstPrice) * 100).toFixed(2)),
       ema10,
       ema20,
+      emaSpreadPct,
       rsi14,
+      rsiStatus,
       macdLine,
       macdSignal,
       macdHistogram,
+      macdStatus,
       signal,
+      signalReason,
       suggestedTp,
       suggestedSl,
-      updatedAt: new Date().toLocaleTimeString()
+      tpMovePct: Number((factor.tp * 100).toFixed(2)),
+      slMovePct: Number((factor.sl * 100).toFixed(2)),
+      updatedAt: new Date().toLocaleTimeString(),
+      isLiveMexc: true
     }
   };
 }
